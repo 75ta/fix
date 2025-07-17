@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tracker</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #f4f7f6; color: #333; display: flex; flex-direction: column; align-items: center; margin: 0; padding: 20px; text-align: center; }
+        .container { display: flex; flex-wrap: wrap; gap: 50px; align-items: center; justify-content: center; margin-top: 30px; margin-bottom: 30px; }
+        .chips-source { text-align: center; }
+        .chip { width: 80px; height: 80px; border-radius: 50%; margin: 10px auto; cursor: grab; transition: transform 0.2s ease; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        .chip:active { cursor: grabbing; transform: scale(1.1); }
+        .chip.green { background-color: #2ecc71; border: 3px solid #27ae60; }
+        .chip.red { background-color: #e74c3c; border: 3px solid #c0392b; }
+        #drop-zone { width: 250px; height: 250px; border: 4px dashed #bdc3c7; border-radius: 50%; display: flex; justify-content: center; align-items: center; transition: background-color 0.3s, border-color 0.3s; }
+        #drop-zone p { color: #7f8c8d; font-size: 1.2em; }
+        #drop-zone.drag-over { background-color: #ecf0f1; border-color: #3498db; }
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.6); display: flex; justify-content: center; align-items: center; z-index: 1000; }
+        .modal-content { background-color: white; padding: 30px; border-radius: 10px; width: 90%; max-width: 400px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); }
+        .modal-content textarea { width: 100%; padding: 10px; margin-top: 10px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 5px; }
+        .modal-buttons { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+        .modal-buttons button { padding: 10px 20px; border-radius: 5px; border: none; cursor: pointer; }
+        .modal-buttons button[type="submit"] { background-color: #2ecc71; color: white; }
+        .modal-buttons button[type="button"] { background-color: #e0e0e0; }
+        #status-message { margin-top: 20px; font-weight: bold; min-height: 20px; }
+        .stats-container { margin-top: 40px; padding: 20px; border: 1px solid #ddd; border-radius: 8px; background-color: #fff; min-width: 250px; }
+        .stats-container h2 { margin-top: 0; }
+        .stats-item { font-size: 1.2em; margin: 10px 0; }
+        .stats-item .good { color: #27ae60; font-weight: bold; }
+        .stats-item .bad { color: #c0392b; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <!-- UI text is still in Russian as requested -->
+    <h1>Трекер</h1>
+    <p>Перетащи фишку в круг, чтобы зафиксировать событие.</p>
+
+    <div class="container">
+        <div class="chips-source">
+            <h3>Фишки:</h3>
+            <div class="chip green" draggable="true" data-type="good"></div>
+            <div class="chip red" draggable="true" data-type="bad"></div>
+        </div>
+        <div id="drop-zone"><p>Перетащи сюда</p></div>
+    </div>
+    
+    <div id="status-message"></div>
+
+    <div class="stats-container">
+        <h2>Статистика за сегодня</h2>
+        <div class="stats-item">
+            Хорошо: <span id="stats-good" class="good">0</span>
+        </div>
+        <div class="stats-item">
+            Плохо: <span id="stats-bad" class="bad">0</span>
+        </div>
+    </div>
+
+    <div id="comment-modal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <h2>Добавь комментарий</h2>
+            <p>Что именно произошло?</p>
+            <form id="comment-form">
+                <textarea id="comment-input" rows="4" required></textarea>
+                <div class="modal-buttons">
+                    <button type="submit">Сохранить</button>
+                    <button type="button" id="cancel-button">Отмена</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwJufT1I2MxTXh7twfpxCEu9fauqSzeQw_eAuNfdMPLKIGDFGHiG8pRijVsq2L3zPW-yw/exec'; // <-- PASTE YOUR SCRIPT URL HERE
+
+        const dropZone = document.getElementById('drop-zone');
+        const chips = document.querySelectorAll('.chip');
+        const modal = document.getElementById('comment-modal');
+        const commentForm = document.getElementById('comment-form');
+        const commentInput = document.getElementById('comment-input');
+        const cancelButton = document.getElementById('cancel-button');
+        const statusMessage = document.getElementById('status-message');
+        const statsGoodEl = document.getElementById('stats-good');
+        const statsBadEl = document.getElementById('stats-bad');
+
+        let draggedChipType = null;
+        
+        // --- Drag and Drop Logic ---
+        chips.forEach(chip => {
+            chip.addEventListener('dragstart', e => {
+                draggedChipType = e.target.dataset.type;
+                setTimeout(() => e.target.style.opacity = '0.5', 0);
+            });
+            chip.addEventListener('dragend', e => {
+                e.target.style.opacity = '1';
+            });
+        });
+
+        dropZone.addEventListener('dragover', e => {
+            e.preventDefault();
+            dropZone.classList.add('drag-over');
+        });
+
+        dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('drag-over');
+        });
+
+        dropZone.addEventListener('drop', e => {
+            e.preventDefault();
+            dropZone.classList.remove('drag-over');
+            if (draggedChipType) {
+                modal.style.display = 'flex';
+                commentInput.focus();
+            }
+        });
+
+        // --- Data Submission Logic ---
+        commentForm.addEventListener('submit', e => {
+            e.preventDefault();
+            const comment = commentInput.value;
+            
+            statusMessage.textContent = 'Saving...';
+            statusMessage.style.color = '#3498db';
+
+            const formData = new FormData();
+            formData.append('type', draggedChipType);
+            formData.append('comment', comment);
+
+            fetch(SCRIPT_URL, { method: 'POST', body: formData })
+            .then(response => response.json())
+            .then(result => {
+                if (result.status === 'success') {
+                    statusMessage.textContent = 'Saved successfully!';
+                    statusMessage.style.color = 'green';
+                    // After a successful submission, update the stats
+                    fetchStats(); 
+                } else {
+                    throw new Error(result.message);
+                }
+            })
+            .catch(error => {
+                console.error('Submission Error:', error);
+                statusMessage.textContent = 'Error! ' + error.message;
+                statusMessage.style.color = 'red';
+            });
+            
+            closeModal();
+        });
+        
+        cancelButton.addEventListener('click', closeModal);
+
+        function closeModal() {
+            modal.style.display = 'none';
+            commentForm.reset();
+            draggedChipType = null;
+        }
+
+        // --- STATISTICS LOGIC ---
+        function fetchStats() {
+            console.log('Requesting stats...');
+            // Create FormData and add the 'action' parameter
+            const formData = new FormData();
+            formData.append('action', 'getStats');
+            
+            // Send a POST request to get stats
+            fetch(SCRIPT_URL, { method: 'POST', body: formData })
+                .then(response => response.json())
+                .then(data => {
+                    console.log('Stats received:', data);
+                    if (data.status === 'success') {
+                        statsGoodEl.textContent = data.good;
+                        statsBadEl.textContent = data.bad;
+                    } else {
+                        console.error('Error fetching stats:', data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Network error while fetching stats:', error);
+                });
+        }
+
+        // Fetch stats when the page first loads
+        document.addEventListener('DOMContentLoaded', fetchStats);
+    </script>
+</body>
+</html>
